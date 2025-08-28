@@ -43,6 +43,12 @@ async def get_db():
 
 # --- Routes ---
 
+@router.get("/api/debug-headers")
+async def debug_headers(request: Request):
+    return dict(request.headers)
+
+
+
 @router.get("/api/me")
 async def get_me(request: Request):
     payload = verify_whop_token(request)
