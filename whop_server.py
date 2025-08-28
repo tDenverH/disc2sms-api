@@ -6,15 +6,16 @@ from subscriber_routes import router as sub_router
 
 app = FastAPI()
 
-# --- CORS Setup ---
+# --- Minimal CORS ---
+# Only allow your Next.js frontend and (optionally) local dev.
 origins = [
-    "https://disc2sms-whop-app-production.up.railway.app",  # frontend direct
-    "https://whop.com",
+    "https://disc2sms-whop-app-production.up.railway.app",
+    "http://localhost:3000",  # local dev frontend
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"https://.*\.whop\.com",
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
