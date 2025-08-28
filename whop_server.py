@@ -9,6 +9,7 @@ app = FastAPI()
 # --- CORS Setup ---
 origins = [
     "https://disc2sms-whop-app-production.up.railway.app",  # frontend direct
+    "https://whop.com",
 ]
 
 app.add_middleware(
