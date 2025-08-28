@@ -4,6 +4,17 @@ from subscriber_routes import router as sub_router
 
 app = FastAPI(title="Disc2SMS Whop App")
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # later restrict to your frontend domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 # Mount Whop authentication routes (/api/me)
 app.include_router(whop_router)
 
