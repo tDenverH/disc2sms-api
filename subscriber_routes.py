@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import os, random, string, datetime
 import asyncpg
 from twilio.rest import Client
@@ -27,18 +27,34 @@ twilio_client = Client(
 TWILIO_FROM = os.environ["TWILIO_PHONE_NUMBER"]
 
 # -------------------
+# Helpers
+# -------------------
+def normalize_phone(us_phone: str) -> str:
+    """Very basic US normalizer: '5179301393' -> '+15179301393'."""
+    p = "".join(ch for ch in us_phone if ch.isdigit())
+    if len(p) == 11 and p.startswith("1"):
+        return f"+{p}"
+    if len(p) == 10:
+        return f"+1{p}"
+    # otherwise return as-is; Twilio will complain if invalid
+    return us_phone
+
+# -------------------
 # REQUEST MODELS
 # -------------------
 class VerifyRequest(BaseModel):
-    userId: str
+    whop_user_id: str
     phone: str
 
+from typing import Optional
+
 class ConfirmRequest(BaseModel):
-    userId: str
     code: str
+    whop_user_id: Optional[str] = None
+    phone: Optional[str] = None
 
 class AlertsRequest(BaseModel):
-    userId: str
+    whop_user_id: str
     alerts: List[str]
 
 # -------------------
@@ -46,60 +62,86 @@ class AlertsRequest(BaseModel):
 # -------------------
 @router.post("/subscribers/verify")
 async def verify_subscriber(req: VerifyRequest, db=Depends(get_db)):
-    # Generate a 6-digit verification code
     code = "".join(random.choices(string.digits, k=6))
+    phone_norm = normalize_phone(req.phone)
 
-    # Save phone + code in DB (overwrite if exists)
-    await db.execute("""
-        INSERT INTO subscribers (whop_user_id, phone, verification_code, verified_at)
-        VALUES ($1, $2, $3, NULL)
+    # Upsert by whop_user_id
+    await db.execute(
+        """
+        INSERT INTO subscribers (whop_user_id, phone, verification_code, verified_at, created_at)
+        VALUES ($1, $2, $3, NULL, NOW())
         ON CONFLICT (whop_user_id)
-        DO UPDATE SET phone=$2, verification_code=$3, verified_at=NULL
-    """, req.userId, req.phone, code)
+        DO UPDATE SET phone = EXCLUDED.phone,
+                      verification_code = EXCLUDED.verification_code,
+                      verified_at = NULL,
+                      updated_at = NOW()
+        """,
+        req.whop_user_id, phone_norm, code
+    )
 
-    # Send SMS via Twilio
     try:
         twilio_client.messages.create(
             body=f"Your Disc2SMS verification code is {code}",
             from_=TWILIO_FROM,
-            to=req.phone
+            to=phone_norm
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Twilio error: {str(e)}")
 
-    return {"message": "Verification SMS sent"}
+    return {"ok": True, "whop_user_id": req.whop_user_id}
 
 # -------------------
 # 2. CONFIRM CODE
 # -------------------
 @router.post("/subscribers/confirm")
 async def confirm_subscriber(req: ConfirmRequest, db=Depends(get_db)):
-    row = await db.fetchrow("""
-        SELECT verification_code FROM subscribers WHERE whop_user_id=$1
-    """, req.userId)
+    # Find the row by whop_user_id OR by phone
+    row = None
+    if req.whop_user_id:
+        row = await db.fetchrow(
+            "SELECT whop_user_id, verification_code FROM subscribers WHERE whop_user_id=$1",
+            req.whop_user_id,
+        )
+    elif req.phone:
+        row = await db.fetchrow(
+            "SELECT whop_user_id, verification_code FROM subscribers WHERE phone=$1",
+            req.phone,
+        )
 
-    if not row or row["verification_code"] != req.code:
+    if not row:
+        raise HTTPException(status_code=404, detail="Subscriber not found")
+
+    if row["verification_code"] != req.code:
         raise HTTPException(status_code=400, detail="Invalid verification code")
 
-    # Mark as verified
-    await db.execute("""
+    await db.execute(
+        """
         UPDATE subscribers
-        SET verified_at=$2, verification_code=NULL
-        WHERE whop_user_id=$1
-    """, req.userId, datetime.datetime.utcnow())
+           SET verified_at = $2,
+               verification_code = NULL
+         WHERE whop_user_id = $1
+        """,
+        row["whop_user_id"],
+        datetime.datetime.utcnow(),
+    )
 
-    return {"message": "Phone confirmed"}
+    # IMPORTANT: return the id so the frontend can navigate with it
+    return {"ok": True, "whop_user_id": row["whop_user_id"]}
 
 # -------------------
 # 3. SAVE ALERTS
 # -------------------
 @router.post("/subscribers/alerts")
 async def save_alerts(req: AlertsRequest, db=Depends(get_db)):
-    # Store alerts (string array in Postgres)
-    await db.execute("""
+    # you can validate keys here if you want (compare to ALERT_GROUPS)
+    await db.execute(
+        """
         UPDATE subscribers
-        SET alerts=$2
-        WHERE whop_user_id=$1
-    """, req.userId, req.alerts)
-
-    return {"message": "Alerts saved"}
+           SET alerts = $2,
+               updated_at = NOW()
+         WHERE whop_user_id = $1
+        """,
+        req.whop_user_id,
+        req.alerts,
+    )
+    return {"ok": True, "alerts": req.alerts}
