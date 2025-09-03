@@ -67,17 +67,16 @@ async def verify_subscriber(req: VerifyRequest, db=Depends(get_db)):
 
     # Upsert by whop_user_id
     await db.execute(
-        """
-        INSERT INTO subscribers (whop_user_id, phone, verification_code, verified_at, created_at)
-        VALUES ($1, $2, $3, NULL, NOW())
-        ON CONFLICT (whop_user_id)
-        DO UPDATE SET phone = EXCLUDED.phone,
-                      verification_code = EXCLUDED.verification_code,
-                      verified_at = NULL,
-                      updated_at = NOW()
-        """,
-        req.whop_user_id, phone_norm, code
-    )
+    """
+    INSERT INTO subscribers (whop_user_id, phone, verification_code, verified_at, created_at)
+    VALUES ($1, $2, $3, NULL, NOW())
+    ON CONFLICT (whop_user_id)
+    DO UPDATE SET phone = EXCLUDED.phone,
+                  verification_code = EXCLUDED.verification_code,
+                  verified_at = NULL
+    """,
+    req.whop_user_id, phone_norm, code
+)
 
     try:
         twilio_client.messages.create(
@@ -137,8 +136,7 @@ async def save_alerts(req: AlertsRequest, db=Depends(get_db)):
     await db.execute(
         """
         UPDATE subscribers
-           SET alerts = $2,
-               updated_at = NOW()
+           SET alerts = $2
          WHERE whop_user_id = $1
         """,
         req.whop_user_id,
