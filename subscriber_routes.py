@@ -2,8 +2,13 @@
 from fastapi import APIRouter, Form, HTTPException
 import os, re
 from typing import List
+from pydantic import BaseModel
 
 router = APIRouter()
+
+class VerifyRequest(BaseModel):
+    whop_user_id: str
+    phone: str
 
 def to_e164(us_phone: str) -> str:
     digits = re.sub(r"\D", "", us_phone or "")
@@ -12,6 +17,12 @@ def to_e164(us_phone: str) -> str:
     if not digits.startswith("1"):
         digits = "1" + digits
     return f"+{digits}"
+
+@router.post("/subscribers/verify")
+async def start_verification(request: VerifyRequest):
+    phone_e164 = to_e164(request.phone)
+    if len(phone_e164) < 12:
+        raise HTTPException(status_code=400, detail="Invalid phone")
 
 @router.post("/webhook")
 async def send_code(
