@@ -1,6 +1,6 @@
-# whop_server.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from whop_routes import router as whop_router
 from subscriber_routes import router as sub_router
 
@@ -16,7 +16,7 @@ app.add_middleware(
         "http://127.0.0.1:3000",
     ],
     allow_credentials=True,
-    allow_methods=["POST", "OPTIONS"],  # form posts + preflight if any
+    allow_methods=["POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
