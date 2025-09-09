@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 import os, random, string, datetime
 import asyncpg
+import secrets
+import string
 from twilio.rest import Client
 
 router = APIRouter()
@@ -48,6 +50,14 @@ class VerifyRequest(BaseModel):
 
 from typing import Optional
 
+class TelegramLinkRequest(BaseModel):
+    whop_user_id: str
+
+class TelegramVerifyRequest(BaseModel):
+    token: str
+    telegram_user_id: int
+    telegram_username: Optional[str] = None
+
 class ConfirmRequest(BaseModel):
     code: str
     whop_user_id: Optional[str] = None
@@ -56,6 +66,9 @@ class ConfirmRequest(BaseModel):
 class AlertsRequest(BaseModel):
     whop_user_id: str
     alerts: List[str]
+    delivery_method: Optional[str] = "sms"  # Add this field
+
+
 
 # -------------------
 # 1. VERIFY PHONE
@@ -88,6 +101,99 @@ async def verify_subscriber(req: VerifyRequest, db=Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Twilio error: {str(e)}")
 
     return {"ok": True, "whop_user_id": req.whop_user_id}
+
+@router.post("/subscribers/telegram-link")
+async def generate_telegram_link(req: TelegramLinkRequest, db=Depends(get_db)):
+    """Generate a unique Telegram deep link for user verification"""
+    
+    # Generate unique verification token
+    verification_token = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
+    
+    # Check if user already exists in telegram_subscribers
+    existing_user = await db.fetchrow(
+        "SELECT id FROM telegram_subscribers WHERE whop_user_id = $1",
+        req.whop_user_id
+    )
+    
+    if existing_user:
+        # Update existing user with new token
+        await db.execute(
+            """
+            UPDATE telegram_subscribers 
+            SET telegram_verification_token = $2
+            WHERE whop_user_id = $1
+            """,
+            req.whop_user_id, verification_token
+        )
+    else:
+        # Create new telegram subscriber record with token
+        await db.execute(
+            """
+            INSERT INTO telegram_subscribers (whop_user_id, telegram_verification_token, created_at)
+            VALUES ($1, $2, NOW())
+            """,
+            req.whop_user_id, verification_token
+        )
+    
+    # Generate Telegram deep link
+    bot_username = os.environ.get("TELEGRAM_BOT_USERNAME", "YourBotUsername")
+    telegram_link = f"https://t.me/{bot_username}?start={verification_token}"
+    
+    return {"telegram_link": telegram_link, "token": verification_token}
+
+@router.post("/subscribers/telegram-verify")
+async def verify_telegram_user(req: TelegramVerifyRequest, db=Depends(get_db)):
+    """Verify Telegram user via token from deep link"""
+    
+    if not req.token or not req.telegram_user_id:
+        raise HTTPException(status_code=400, detail="Token and telegram_user_id required")
+    
+    # Find subscriber by verification token
+    row = await db.fetchrow(
+        "SELECT whop_user_id FROM telegram_subscribers WHERE telegram_verification_token = $1",
+        req.token
+    )
+    
+    if not row:
+        raise HTTPException(status_code=404, detail="Invalid verification token")
+    
+    # Update subscriber with Telegram info
+    await db.execute(
+        """
+        UPDATE telegram_subscribers 
+        SET telegram_user_id = $2,
+            telegram_chat_id = $2,
+            telegram_username = $3,
+            verified_at = NOW(),
+            telegram_verification_token = NULL,
+            updated_at = NOW()
+        WHERE whop_user_id = $1
+        """,
+        row['whop_user_id'],
+        req.telegram_user_id,
+        req.telegram_username
+    )
+    
+    return {"ok": True, "whop_user_id": row['whop_user_id']}
+
+@router.post("/subscribers/telegram-alerts")
+async def save_telegram_alerts(req: AlertsRequest, db=Depends(get_db)):
+    """Save alert preferences for Telegram user"""
+    
+    # Update alerts for telegram subscriber
+    await db.execute(
+        """
+        UPDATE telegram_subscribers
+        SET alerts = $2, updated_at = NOW()
+        WHERE whop_user_id = $1
+        """,
+        req.whop_user_id,
+        req.alerts
+    )
+    
+    return {"ok": True, "alerts": req.alerts, "delivery_method": "telegram"}
+
+
 
 # -------------------
 # 2. CONFIRM CODE
@@ -130,16 +236,64 @@ async def confirm_subscriber(req: ConfirmRequest, db=Depends(get_db)):
 # -------------------
 # 3. SAVE ALERTS
 # -------------------
+# -------------------
+# 3. UNIFIED ALERTS ENDPOINT
+# -------------------
 @router.post("/subscribers/alerts")
 async def save_alerts(req: AlertsRequest, db=Depends(get_db)):
-    # you can validate keys here if you want (compare to ALERT_GROUPS)
-    await db.execute(
-        """
-        UPDATE subscribers
-           SET alerts = $2
-         WHERE whop_user_id = $1
-        """,
-        req.whop_user_id,
-        req.alerts,
-    )
-    return {"ok": True, "alerts": req.alerts}
+    """Save alert preferences - handles SMS, Telegram, or both"""
+    
+    delivery_method = req.delivery_method or "sms"
+    
+    # Handle SMS alerts (existing subscribers table)
+    if delivery_method in ["sms", "both"]:
+        # Check if SMS subscriber exists
+        sms_exists = await db.fetchrow(
+            "SELECT whop_user_id FROM subscribers WHERE whop_user_id = $1",
+            req.whop_user_id
+        )
+        
+        if sms_exists:
+            await db.execute(
+                """
+                UPDATE subscribers
+                SET alerts = $2
+                WHERE whop_user_id = $1
+                """,
+                req.whop_user_id,
+                req.alerts
+            )
+    
+    # Handle Telegram alerts (telegram_subscribers table)
+    if delivery_method in ["telegram", "both"]:
+        # Check if Telegram subscriber exists
+        telegram_exists = await db.fetchrow(
+            "SELECT whop_user_id FROM telegram_subscribers WHERE whop_user_id = $1",
+            req.whop_user_id
+        )
+        
+        if telegram_exists:
+            await db.execute(
+                """
+                UPDATE telegram_subscribers
+                SET alerts = $2, updated_at = NOW()
+                WHERE whop_user_id = $1
+                """,
+                req.whop_user_id,
+                req.alerts
+            )
+        else:
+            # Create placeholder telegram subscriber (they'll verify later)
+            await db.execute(
+                """
+                INSERT INTO telegram_subscribers (whop_user_id, alerts, created_at)
+                VALUES ($1, $2, NOW())
+                ON CONFLICT (whop_user_id) DO UPDATE SET
+                alerts = EXCLUDED.alerts,
+                updated_at = NOW()
+                """,
+                req.whop_user_id,
+                req.alerts
+            )
+    
+    return {"ok": True, "alerts": req.alerts, "delivery_method": delivery_method}
