@@ -174,7 +174,7 @@ async def verify_telegram_user(req: TelegramVerifyRequest, db=Depends(get_db)):
         req.telegram_username
     )
     
-    return {"ok": True, "whop_user_id": row['whop_user_id']}
+    return {"ok": True, "whop_user_id": row['whop_user_id'], "status": "verified"}
 
 @router.post("/subscribers/telegram-alerts")
 async def save_telegram_alerts(req: AlertsRequest, db=Depends(get_db)):
