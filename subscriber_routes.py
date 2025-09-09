@@ -111,7 +111,7 @@ async def generate_telegram_link(req: TelegramLinkRequest, db=Depends(get_db)):
     
     # Check if user already exists in telegram_subscribers
     existing_user = await db.fetchrow(
-        "SELECT id FROM telegram_subscribers WHERE whop_user_id = $1",
+        "SELECT whop_user_id FROM telegram_subscribers WHERE whop_user_id = $1",
         req.whop_user_id
     )
     
