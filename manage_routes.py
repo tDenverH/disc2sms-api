@@ -92,6 +92,15 @@ async def require_token(conn: asyncpg.Connection, token: str):
 # -------------------
 # ROUTES
 # -------------------
+@router.get("/manage/debug")
+async def debug_env():
+    import os
+    return {
+        "MANAGE_LINK_BASE": os.getenv("MANAGE_LINK_BASE"),
+        "MANAGE_LINK_BASE_exists": "MANAGE_LINK_BASE" in os.environ,
+        "all_env_vars": [k for k in os.environ.keys() if "MANAGE" in k or "DATABASE" in k]
+    }
+
 @router.post("/manage/token")
 async def create_manage_token(body: ManageTokenRequest, db=Depends(get_db)):
     """Generate a magic link token for managing alerts"""
