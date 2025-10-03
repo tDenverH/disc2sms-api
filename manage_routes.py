@@ -119,6 +119,7 @@ async def create_manage_token(body: ManageTokenRequest, db=Depends(get_db)):
     
     # Build link
     base = os.getenv("MANAGE_LINK_BASE", "").rstrip("/")
+    pring(f"{DEBUG} MANAGE_LINK_BASE = '{base}'")
     link = f"{base}?token={token}" if base else token
     
     return {
