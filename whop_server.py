@@ -14,11 +14,13 @@ app.add_middleware(
         "https://0uugdccam2vlgq5fg6y9.apps.whop.com",
         "https://tpgverify.disc2sms.com",
         "https://tpgverifycode.disc2sms.com",
+        "https://disc2sms-whop-app-dev-production.up.railway.app",  # ADD THIS
+        "https://disc2sms-whop-app-production.up.railway.app",  # ADD THIS TOO (for prod)
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
     allow_credentials=True,
-    allow_methods=["POST", "OPTIONS"],
+    allow_methods=["POST", "GET", "OPTIONS"],  # ADD "GET" for the manage endpoints
     allow_headers=["*"],
 )
 
