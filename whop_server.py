@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from whop_routes import router as whop_router
 from subscriber_routes import router as sub_router
+from manage_routes import router as manage_router
+
 
 app = FastAPI()
 
@@ -22,3 +24,4 @@ app.add_middleware(
 
 app.include_router(whop_router)
 app.include_router(sub_router)
+app.include_router(manage_router)
